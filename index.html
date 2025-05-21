@@ -2,174 +2,140 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1.0">
-  <title>MCDA TOPSIS – Multi-critères</title>
-
-  <!-- Librairies -->
+  <title>Debug TOPSIS</title>
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.1/papaparse.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.3.0/dist/chart.umd.min.js"></script>
-
   <style>
     body { font-family: Arial, sans-serif; margin: 20px; }
-    h1 { margin-bottom: 10px; }
     .control { margin: 10px 0; }
-    textarea { width: 100%; }
+    textarea { width: 100%; height: 120px; }
+    pre { background: #f7f7f7; padding: 10px; border: 1px solid #ddd; }
     table { border-collapse: collapse; width: 100%; margin-top: 20px; }
-    th, td { border: 1px solid #ccc; padding: 6px; text-align: center; }
-    th { background: #f0f0f0; }
-    button, input { margin-top: 5px; }
-    #chart { max-width: 600px; margin-top: 30px; }
+    th, td { border: 1px solid #ccc; padding: 4px 6px; text-align: center; }
+    th { background: #eee; }
   </style>
 </head>
 <body>
 
-  <h1>🔍 TOPSIS – Prise de décision multi-critères</h1>
+  <h1>🔍 Debug TOPSIS</h1>
 
-  <!-- 1) Upload -->
   <div class="control">
-    <label>Charger fichier (.csv/.xlsx) :</label>
-    <input type="file" id="fileInput" accept=".csv,.xlsx,.xls">
+    <label>Coller vos données CSV :</label><br>
+    <textarea id="csvText" placeholder="Solution;CR1;CR2;CR3;CR4\nS1;0.96;0.57;0.83;0.80\n…"></textarea><br>
+    <button id="loadText">▶ Charger et debugger</button>
   </div>
 
-  <!-- 2) Coller CSV -->
-  <div class="control">
-    <label>Ou coller vos données CSV :</label><br>
-    <textarea id="textInput" rows="6" placeholder="Solution;Critère1;Critère2;…"></textarea><br>
-    <button id="loadText">▶ Charger depuis la zone de texte</button>
-  </div>
+  <h2>Parsed data (console & page)</h2>
+  <pre id="debugRaw">rawData = ...</pre>
+  <pre id="debugHdr">headers = ...</pre>
 
-  <!-- 3) Calculer TOPSIS -->
   <div class="control">
     <button id="runBtn">▶ Calculer TOPSIS</button>
   </div>
 
-  <!-- 4) Résultats -->
   <div id="result"></div>
   <canvas id="chart"></canvas>
 
-<script>
-  const fileInput = document.getElementById('fileInput'),
-        textInput = document.getElementById('textInput'),
-        loadText  = document.getElementById('loadText'),
-        runBtn    = document.getElementById('runBtn');
+  <script>
+    const txt = document.getElementById('csvText'),
+          btnLoad = document.getElementById('loadText'),
+          btnRun  = document.getElementById('runBtn'),
+          dbgRaw  = document.getElementById('debugRaw'),
+          dbgHdr  = document.getElementById('debugHdr'),
+          result  = document.getElementById('result'),
+          ctx     = document.getElementById('chart').getContext('2d');
 
-  let rawData = [];  // contiendra un tableau d’objets { Solution: "...", Critère1: 0.62, ... }
+    let rawData = [];
 
-  // Fonction générique pour parser un tableau brut et le stocker
-  function setData(rows) {
-    rawData = rows.map(r => {
-      const obj = {};
-      // On copie toutes les propriétés (Solution + critères)
-      for (let k in r) {
-        obj[k] = (k === Object.keys(r)[0]) ? r[k] : parseFloat(r[k]) || 0;
+    // 1) Charger et debugger
+    btnLoad.addEventListener('click', () => {
+      const content = txt.value.trim();
+      if (!content) {
+        alert('Veuillez coller vos données CSV.');
+        return;
       }
-      return obj;
-    });
-    alert(`Données chargées : ${rawData.length} lignes, ${Object.keys(rawData[0]).length-1} critères.`);
-  }
+      Papa.parse(content, {
+        header: true,
+        delimiter: ';',
+        dynamicTyping: false,
+        skipEmptyLines: true,
+        complete: res => {
+          rawData = res.data;
+          console.log('🔍 Parsed data', rawData);
+          dbgRaw.textContent = JSON.stringify(rawData, null, 2);
 
-  // 1) Upload CSV/Excel
-  fileInput.addEventListener('change', async e => {
-    const f = e.target.files[0];
-    if (!f) return;
-    const ext = f.name.split('.').pop().toLowerCase();
+          const headers = rawData.length ? Object.keys(rawData[0]) : [];
+          console.log('🔍 Headers', headers);
+          dbgHdr.textContent = JSON.stringify(headers, null, 2);
 
-    if (ext === 'csv') {
-      Papa.parse(f, {
-        header: true, delimiter: ';',
-        dynamicTyping: false, skipEmptyLines: true,
-        complete: res => setData(res.data),
-        error: err => alert('Erreur CSV : '+err.message)
+          alert(`Données chargées (${rawData.length} lignes, ${headers.length-1} critères).`);
+        },
+        error: err => alert('Erreur CSV : ' + err.message)
       });
-    }
-    else if (ext === 'xlsx' || ext==='xls') {
-      const ab = await f.arrayBuffer();
-      const wb = XLSX.read(ab, { type: 'array' });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
-      setData(rows);
-    } else {
-      alert('Format non supporté : CSV ou XLSX uniquement.');
-    }
-  });
-
-  // 2) Charger depuis la zone de texte
-  loadText.addEventListener('click', () => {
-    const txt = textInput.value;
-    if (!txt.trim()) return alert('Collez d’abord vos données CSV.');
-    Papa.parse(txt, {
-      header: true, delimiter: ';',
-      dynamicTyping: false, skipEmptyLines: true,
-      complete: res => setData(res.data),
-      error: err => alert('Erreur CSV : '+err.message)
     });
-  });
 
-  // 3) Calcul TOPSIS & affichage
-  runBtn.addEventListener('click', () => {
-    if (!rawData.length) return alert('Chargez d’abord des données valides.');
+    // 2) Calcul TOPSIS
+    btnRun.addEventListener('click', () => {
+      if (!rawData.length) {
+        alert('Chargez d’abord des données via « Charger et debugger ».');
+        return;
+      }
+      const headers = Object.keys(rawData[0]);
+      const altKey  = headers[0];
+      const crits   = headers.slice(1);
 
-    const headers = Object.keys(rawData[0]);
-    const altKey  = headers[0];            // "Solution"
-    const crits   = headers.slice(1);      // tous les autres
-
-    const m = rawData.length, n = crits.length;
-    // 3.1 Matrice valeurs
-    const mat = rawData.map(r => crits.map(c => parseFloat(r[c]) || 0));
-
-    // 3.2 Normalisation (Vecteur euclidien)
-    const normCols = crits.map((_,j) => {
-      const col = mat.map(r=>r[j]);
-      const denom = Math.hypot(...col);
-      return col.map(v=> denom? v/denom:0 );
-    });
-    const norm = Array.from({length:m},(_,i)=>normCols.map(col=>col[i]));
-
-    // 3.3 Poids égaux
-    const w = Array(n).fill(1/n);
-    const weighted = norm.map(r=>r.map((v,j)=>v*w[j]));
-
-    // 3.4 Idéaux + Scores
-    const ideaux = crits.map((_,j) => {
-      const col = weighted.map(r=>r[j]);
-      return { best: Math.max(...col), worst: Math.min(...col) };
-    });
-    const scores = weighted.map(r => {
-      let dB=0, dW=0;
-      r.forEach((v,j) => {
-        dB += (v-ideaux[j].best)**2;
-        dW += (v-ideaux[j].worst)**2;
+      // construire la matrice
+      const mat = rawData.map(r => crits.map(c => parseFloat(r[c]) || 0));
+      const m = mat.length, n = crits.length;
+      // normalisation
+      const normCols = crits.map((_,j) => {
+        const col = mat.map(r=>r[j]);
+        const denom = Math.hypot(...col);
+        return col.map(v=> denom ? v/denom : 0);
       });
-      return Math.sqrt(dW) / (Math.sqrt(dB) + Math.sqrt(dW));
+      const norm = Array.from({length:m},(_,i)=>normCols.map(col=>col[i]));
+      // poids = 1/n
+      const w = Array(n).fill(1/n);
+      const weighted = norm.map(r=>r.map((v,j)=>v*w[j]));
+      // idéaux
+      const ideaux = crits.map((_,j)=>{
+        const col = weighted.map(r=>r[j]);
+        return { best: Math.max(...col), worst: Math.min(...col) };
+      });
+      // scores
+      const scores = weighted.map(r=>{
+        let dB=0, dW=0;
+        r.forEach((v,j)=>{
+          dB += (v-ideaux[j].best)**2;
+          dW += (v-ideaux[j].worst)**2;
+        });
+        return Math.sqrt(dW)/(Math.sqrt(dB)+Math.sqrt(dW));
+      });
+      // tri
+      const ranked = rawData.map((r,i)=>({
+        alt: r[altKey],
+        score: scores[i]
+      })).sort((a,b)=>b.score-a.score);
+
+      // afficher
+      let html = '<h2>Résultats TOPSIS</h2><table><thead><tr>'
+               + `<th>${altKey}</th><th>Score</th><th>Rang</th>`
+               + '</tr></thead><tbody>';
+      ranked.forEach((o,i)=>{
+        html += `<tr><td>${o.alt}</td><td>${o.score.toFixed(4)}</td><td>${i+1}</td></tr>`;
+      });
+      html += '</tbody></table>';
+      result.innerHTML = html;
+
+      new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: ranked.map(o=>o.alt),
+          datasets: [{ label: 'Score TOPSIS', data: ranked.map(o=>o.score) }]
+        },
+        options:{ responsive:true }
+      });
     });
-
-    // 3.5 Tri & affichage
-    const ranked = rawData.map((r,i)=>({ alt:r[altKey], score:scores[i] }))
-                         .sort((a,b)=>b.score-a.score);
-
-    // Tableau
-    let html = '<h2>Résultats TOPSIS</h2>'
-             + '<table><thead><tr>'
-             + `<th>${altKey}</th><th>Score</th><th>Rang</th>`
-             + '</tr></thead><tbody>';
-    ranked.forEach((o,i)=> {
-      html += `<tr><td>${o.alt}</td><td>${o.score.toFixed(4)}</td><td>${i+1}</td></tr>`;
-    });
-    html += '</tbody></table>';
-    document.getElementById('result').innerHTML = html;
-
-    // Graphique
-    new Chart(document.getElementById('chart'), {
-      type: 'bar',
-      data: {
-        labels: ranked.map(o=>o.alt),
-        datasets:[{ label:'Score TOPSIS', data: ranked.map(o=>o.score) }]
-      },
-      options:{ responsive:true }
-    });
-  });
-</script>
-
+  </script>
 </body>
 </html>
