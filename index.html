@@ -14,6 +14,7 @@
     body { font-family: Arial, sans-serif; margin: 20px; }
     h1 { margin-bottom: 10px; }
     .control { margin: 10px 0; }
+    textarea { width: 100%; }
     table { border-collapse: collapse; width: 100%; margin-top: 20px; }
     th, td { border: 1px solid #ccc; padding: 6px; text-align: center; }
     th { background: #f0f0f0; }
@@ -25,11 +26,20 @@
 
   <h1>⚖️ Classement selon scénario d’influence</h1>
 
+  <!-- 1) Upload CSV ou XLSX -->
   <div class="control">
-    <label for="csvFile">Charger les scores (CSV ou Excel) :</label>
+    <label for="csvFile">Charger un fichier (.csv/.xlsx) :</label>
     <input type="file" id="csvFile" accept=".csv,.xlsx,.xls">
   </div>
 
+  <!-- 2) Coller du CSV directement -->
+  <div class="control">
+    <label for="csvText">Ou coller vos données CSV :</label><br>
+    <textarea id="csvText" rows="6" placeholder="Solution;CR_restaurateurs;Architecte\nS1;0.62;0.54\n…"></textarea><br>
+    <button id="useText">▶ Charger depuis la zone de texte</button>
+  </div>
+
+  <!-- 3) Choix du scénario -->
   <div class="control">
     <label for="scenario">Choisir le scénario :</label>
     <select id="scenario">
@@ -40,70 +50,74 @@
     <button id="runBtn">▶ Calculer</button>
   </div>
 
+  <!-- 4) Résultats -->
   <div id="result"></div>
   <canvas id="chart"></canvas>
 
   <script>
-    const fileInput = document.getElementById('csvFile');
-    const runBtn    = document.getElementById('runBtn');
+    const fileInput = document.getElementById('csvFile'),
+          useText   = document.getElementById('useText'),
+          runBtn    = document.getElementById('runBtn');
     let data = [];
 
-    // 1) Chargement du fichier (CSV ou Excel)
+    // Fonction de parsing générique
+    function parseData(rawRows) {
+      data = rawRows.map(r => ({
+        sol:   r.Solution    || r.solution || r.SOLUTION || '',
+        cr:    parseFloat(r.CR_restaurateurs) || parseFloat(r.CR) || 0,
+        arch:  parseFloat(r.Architecte)       || parseFloat(r.arch) || 0
+      }));
+      alert(`Données chargées (${data.length} lignes).`);
+    }
+
+    // 1) Upload Fichier
     fileInput.addEventListener('change', async e => {
       const file = e.target.files[0];
       if (!file) return;
-
       const ext = file.name.split('.').pop().toLowerCase();
+
       if (ext === 'csv') {
         Papa.parse(file, {
-          header: true,
-          delimiter: ";",
-          dynamicTyping: true,
-          skipEmptyLines: true,
-          complete: res => {
-            data = res.data.map(r => ({
-              sol:  r.Solution    || r.solution || r.SOLUTION || '',
-              cr:   parseFloat(r.CR_restaurateurs) || parseFloat(r.CR) || 0,
-              arch: parseFloat(r.Architecte)       || parseFloat(r.arch) || 0
-            }));
-            alert(`CSV chargé (${data.length} lignes).`);
-          },
+          header: true, delimiter: ";",
+          dynamicTyping: true, skipEmptyLines: true,
+          complete: res => parseData(res.data),
           error: err => alert('Erreur CSV : ' + err.message)
         });
-      } else if (ext === 'xlsx' || ext === 'xls') {
+      }
+      else if (ext === 'xlsx' || ext === 'xls') {
         const ab = await file.arrayBuffer();
         const wb = XLSX.read(ab, { type: 'array' });
         const ws = wb.Sheets[wb.SheetNames[0]];
         const raw = XLSX.utils.sheet_to_json(ws, { defval: null });
-        data = raw.map(r => ({
-          sol:  r.Solution    || r.solution || r.SOLUTION || '',
-          cr:   parseFloat(r.CR_restaurateurs) || parseFloat(r.CR) || 0,
-          arch: parseFloat(r.Architecte)       || parseFloat(r.arch) || 0
-        }));
-        alert(`Excel chargé (${data.length} lignes).`);
-      } else {
-        alert('Format non supporté : CSV ou XLSX uniquement.');
+        parseData(raw);
       }
+      else alert('Format non supporté : CSV ou XLSX uniquement.');
     });
 
-    // 2) Calcul et affichage
-    runBtn.addEventListener('click', () => {
-      if (!data.length) {
-        alert('Importez d’abord un fichier valide.');
-        return;
-      }
+    // 2) Charger depuis la zone de texte
+    useText.addEventListener('click', () => {
+      const txt = document.getElementById('csvText').value;
+      if (!txt.trim()) return alert('Collez d’abord des données CSV.');
+      Papa.parse(txt, {
+        header: true, delimiter: ";",
+        dynamicTyping: true, skipEmptyLines: true,
+        complete: res => parseData(res.data),
+        error: err => alert('Erreur CSV : ' + err.message)
+      });
+    });
 
-      // Lecture du scénario choisi
+    // 3) Calculer et afficher
+    runBtn.addEventListener('click', () => {
+      if (!data.length) return alert('Importez ou collez d’abord vos données.');
+
       const [wCR, wArch] = document.getElementById('scenario')
         .value.split(',').map(parseFloat);
 
-      // Calcul du score pondéré
-      const results = data.map(d => ({
-        sol:   d.sol,
-        score: d.cr * wCR + d.arch * wArch
-      })).sort((a,b) => b.score - a.score);
+      const results = data
+        .map(d => ({ sol: d.sol, score: d.cr*wCR + d.arch*wArch }))
+        .sort((a,b) => b.score - a.score);
 
-      // Génération du tableau HTML
+      // Tableau
       let html = '<h2>Classement</h2>'
                + '<table><thead><tr>'
                + '<th>Solution</th><th>Score</th><th>Rang</th>'
@@ -118,7 +132,7 @@
       html += '</tbody></table>';
       document.getElementById('result').innerHTML = html;
 
-      // Affichage du graphique
+      // Graphique
       new Chart(document.getElementById('chart'), {
         type: 'bar',
         data: {
