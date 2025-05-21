@@ -1,84 +1,79 @@
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-  <meta charset="UTF-8">
-  <title>Scenario TOPSIS – CR vs Architecte</title>
-  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.1/papaparse.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.3.0/dist/chart.umd.min.js"></script>
-  <style>
-    body { font-family: Arial, sans-serif; margin: 20px; }
-    h1 { margin-bottom: 10px; }
-    .control { margin: 10px 0; }
-    table { border-collapse: collapse; width: 100%; margin-top: 20px; }
-    th, td { border: 1px solid #ccc; padding: 6px; text-align: center; }
-    th { background: #f0f0f0; }
-    select, button { margin-left: 10px; }
-  </style>
-</head>
-<body>
-
-  <h1>⚖️ Classement selon scénario d’influence</h1>
-
-  <div class="control">
-    <label>Charger les scores :</label>
-    <input type="file" id="csvFile" accept=".csv">
-  </div>
-
-  <div class="control">
-    <label for="scenario">Choisir le scénario :</label>
-    <select id="scenario">
-      <option value="0.25,0.75">CR 25 % – Arch 75 %</option>
-      <option value="0.50,0.50" selected>CR 50 % – Arch 50 %</option>
-      <option value="0.75,0.25">CR 75 % – Arch 25 %</option>
-    </select>
-    <button id="runBtn">▶ Calculer</button>
-  </div>
-
-  <div id="result"></div>
-  <canvas id="chart" style="max-width:600px;margin-top:30px;"></canvas>
+<!-- Ajoutez avant </body> ce script -->
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.1/papaparse.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.3.0/dist/chart.umd.min.js"></script>
 
 <script>
+  const fileInput = document.getElementById('csvFile'); // on garde cet ID
+  const runBtn    = document.getElementById('runBtn');
   let data = [];
 
-  // 1) Charger le CSV
-  document.getElementById('csvFile').addEventListener('change', e => {
-    if(!e.target.files.length) return;
-    Papa.parse(e.target.files[0], {
-      header: true,
-      delimiter: ";",
-      dynamicTyping: true,
-      skipEmptyLines: true,
-      complete: res => {
-        data = res.data.map(r => ({
-          sol: r.Solution,
-          cr: parseFloat(r.CR_restaurateurs),
-          arch: parseFloat(r.Architecte)
-        }));
-        alert(`CSV chargé (${data.length} solutions).`);
-      },
-      error: err => alert('Erreur CSV : '+err.message)
-    });
+  // 1) Lorsque l’utilisateur charge un fichier
+  fileInput.addEventListener('change', async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (ext === 'csv') {
+      // parser CSV
+      Papa.parse(file, {
+        header: true,
+        delimiter: ";",
+        dynamicTyping: true,
+        skipEmptyLines: true,
+        complete: res => {
+          data = res.data.map(r => ({
+            sol:   r.Solution    || r.solution || r.SOLUTION,
+            cr:    parseFloat(r.CR_restaurateurs) || parseFloat(r.CR) || 0,
+            arch:  parseFloat(r.Architecte)       || parseFloat(r.arch)   || 0
+          }));
+          alert(`CSV chargé (${data.length} lignes).`);
+        },
+        error: err => alert('Erreur CSV: '+err.message)
+      });
+    } else if (ext === 'xlsx' || ext === 'xls') {
+      // parser XLSX / XLS via SheetJS
+      const ab = await file.arrayBuffer();
+      const wb = XLSX.read(ab, { type: 'array' });
+      const sheetName = wb.SheetNames[0];
+      const ws = wb.Sheets[sheetName];
+      const raw = XLSX.utils.sheet_to_json(ws, { defval: null });
+      data = raw.map(r => ({
+        sol:   r.Solution    || r.solution || r.SOLUTION,
+        cr:    parseFloat(r.CR_restaurateurs) || parseFloat(r.CR) || 0,
+        arch:  parseFloat(r.Architecte)       || parseFloat(r.arch) || 0
+      }));
+      alert(`Excel chargé (${data.length} lignes).`);
+    } else {
+      alert('Format non pris en charge : CSV ou XLSX uniquement.');
+    }
   });
 
-  // 2) Calcul et affichage
-  document.getElementById('runBtn').addEventListener('click', () => {
-    if(!data.length) return alert('Importez d’abord le CSV.');
-    // lire le scénario
-    const [wCR, wArch] = document.getElementById('scenario').value
-      .split(',').map(parseFloat);
+  // 2) Calculer et afficher selon le scénario choisi
+  runBtn.addEventListener('click', () => {
+    if (!data.length) return alert('Importez d’abord un fichier valide.');
 
-    // calcul des scores pondérés
+    // lecture du scénario
+    const [wCR, wArch] = document.getElementById('scenario')
+      .value.split(',').map(parseFloat);
+
+    // calcul du score pondéré
     const results = data.map(d => ({
-      sol: d.sol,
+      sol:   d.sol || '–',
       score: d.cr * wCR + d.arch * wArch
-    }))
-    .sort((a,b) => b.score - a.score);
+    })).sort((a,b) => b.score - a.score);
 
     // tableau HTML
     let html = '<h2>Classement</h2>'
-             + '<table><thead><tr><th>Solution</th><th>Score</th><th>Rang</th></tr></thead><tbody>';
+             + '<table><thead><tr>'
+             + '<th>Solution</th><th>Score</th><th>Rang</th>'
+             + '</tr></thead><tbody>';
     results.forEach((r,i) => {
-      html += `<tr><td>${r.sol}</td><td>${r.score.toFixed(3)}</td><td>${i+1}</td></tr>`;
+      html += `<tr>
+                 <td>${r.sol}</td>
+                 <td>${r.score.toFixed(3)}</td>
+                 <td>${i+1}</td>
+               </tr>`;
     });
     html += '</tbody></table>';
     document.getElementById('result').innerHTML = html;
@@ -88,12 +83,9 @@
       type: 'bar',
       data: {
         labels: results.map(r => r.sol),
-        datasets: [{ label: 'Score pondéré', data: results.map(r => r.score) }]
+        datasets: [{ label: 'Score pondéré', data: results.map(r=>r.score) }]
       },
       options: { responsive: true }
     });
   });
 </script>
-
-</body>
-</html>
